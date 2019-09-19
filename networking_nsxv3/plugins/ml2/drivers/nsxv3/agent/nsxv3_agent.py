@@ -25,8 +25,6 @@ from networking_nsxv3.common.locking import LockManager
 from networking_nsxv3.api import rpc as nsxv3_rpc
 from networking_nsxv3.plugins.ml2.drivers.nsxv3.agent import nsxv3_facada
 from networking_nsxv3.plugins.ml2.drivers.nsxv3.agent import nsxv3_utils
-from networking_nsxv3.plugins.ml2.drivers.nsxv3.agent import nsxv3_migration
-from networking_nsxv3.plugins.ml2.drivers.nsxv3.agent import vsphere_client
 from networking_nsxv3.common.scheduling import Scheduler
 
 # Eventlet Best Practices
@@ -38,10 +36,6 @@ if not os.environ.get('DISABLE_EVENTLET_PATCHING'):
 LOG = logging.getLogger(__name__)
 
 AGENT_SYNCHRONIZATION_LOCK = "AGENT_SYNCHRONIZATION_LOCK"
-
-
-def is_migration_enabled():
-    return cfg.CONF.AGENT.enable_runtime_migration_from_dvs_driver
 
 
 class NSXv3AgentManagerRpcSecurityGroupCallBackMixin(object):
@@ -143,11 +137,10 @@ class NSXv3AgentManagerRpcCallBackBase(
     Base class for managers RPC callbacks.
     """
 
-    def __init__(self, context, agent, sg_agent, nsxv3, vsphere, rpc):
+    def __init__(self, context, agent, sg_agent, nsxv3, rpc):
         super(NSXv3AgentManagerRpcCallBackBase, self).__init__(
             context, agent, sg_agent)
         self.nsxv3 = nsxv3
-        self.vsphere = vsphere
         self.rpc = rpc
         self.pool_jobs = eventlet.greenpool.GreenPool(1)
         self.pool_workers = eventlet.greenpool.GreenPool(
@@ -352,7 +345,6 @@ class NSXv3AgentManagerRpcCallBackBase(
                     }
         return {}
 
-    @nsxv3_migration.migrator(is_enabled_callback=is_migration_enabled)
     def port_update(self, context, port=None, network_type=None,
                     physical_network=None, segmentation_id=None):
         vnic_type = port.get(portbindings.VNIC_TYPE)
@@ -389,7 +381,6 @@ class NSXv3AgentManagerRpcCallBackBase(
             )
         self.updated_devices.add(port['mac_address'])
 
-    @nsxv3_migration.migrator(is_enabled_callback=is_migration_enabled)
     def port_delete(self, context, **kwargs):
         LOG.debug("Deleting port " + str(kwargs))
         # Port is deleted by Nova when destroying the instance
@@ -421,12 +412,11 @@ class NSXv3AgentManagerRpcCallBackBase(
 
 class NSXv3Manager(amb.CommonAgentManagerBase):
 
-    def __init__(self, nsxv3=None, vsphere=None):
+    def __init__(self, nsxv3=None):
         super(NSXv3Manager, self).__init__()
         context = neutron_context.get_admin_context()
 
         self.nsxv3 = nsxv3
-        self.vsphere = vsphere
         self.rpc = None
         self.rpc_plugin = nsxv3_rpc.NSXv3ServerRpcApi(context,
                                                       nsxv3_constants.NSXV3_SERVER_RPC_TOPIC,
@@ -513,7 +503,6 @@ class NSXv3Manager(amb.CommonAgentManagerBase):
                 agent=agent,
                 sg_agent=sg_agent,
                 nsxv3=self.nsxv3,
-                vsphere=self.vsphere,
                 rpc=self.rpc_plugin)
         return self.rpc
 
@@ -625,17 +614,14 @@ def main():
 
     nsxv3 = nsxv3_facada.NSXv3Facada()
     nsxv3.setup()
-    vsphere = vsphere_client.VSphereClient()
 
     agent = ca.CommonAgentLoop(
-        NSXv3Manager(nsxv3=nsxv3, vsphere=vsphere),
+        NSXv3Manager(nsxv3=nsxv3),
         cfg.CONF.AGENT.polling_interval,
         cfg.CONF.AGENT.quitting_rpc_timeout,
         nsxv3_constants.NSXV3_AGENT_TYPE,
         nsxv3_constants.NSXV3_BIN
     )
 
-    LOG.info("Activate runtime migration from ML2 DVS driver=%s",
-             is_migration_enabled())
     LOG.info("VMware NSXv3 Agent initialized successfully.")
     service.launch(cfg.CONF, agent, restart_method='mutate').wait()
