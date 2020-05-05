@@ -52,7 +52,10 @@ class RetryPolicy(object):
                     if 200 <= response.status_code < 300 or \
                         response.status_code in [404]:
                         return response
-                    
+                    if response.status_code in [401, 403]:
+                        self._login()
+                        continue
+
                     last_err = "Error Code={} Message={}"\
                         .format(response.status_code, response.content)
 
@@ -60,9 +63,6 @@ class RetryPolicy(object):
                     LOG.error("Request={} Response={}".format(requestInfo,
                                                               last_err))
 
-                    if response.status_code in [401, 403]:
-                        self._login()
-                        continue
 
                     # skip retry on the ramaining NSX errors
                     break                    
@@ -165,12 +165,14 @@ class AgentIdentifier:
 
     @staticmethod
     def build(identifier):
-        return "{}-{}".format(cfg.CONF.AGENT.agent_id, identifier)
+        return identifier
+        #return "{}-{}".format(cfg.CONF.AGENT.agent_id, identifier)
 
     @staticmethod
     def extract(identifier):
-        tokens = identifier.split(cfg.CONF.AGENT.agent_id + '-')
-        return tokens.pop() if len(tokens) == 2 else None
+        return identifier
+        #tokens = identifier.split(cfg.CONF.AGENT.agent_id + '-')
+        #return tokens.pop() if len(tokens) == 2 else None
 
 
 class InfraBuilder:
@@ -365,7 +367,7 @@ class InfraBuilder:
                 return
 
         if rule.remote_ip_prefix is not None:
-            remote_cidr = str(ipaddress.ip_network(unicode(rule.remote_ip_prefix)))
+            remote_cidr = str(ipaddress.ip_network(unicode(rule.remote_ip_prefix), strict=False))
             
             if remote_cidr not in [None, '0.0.0.0/0', '::/0']:
 
